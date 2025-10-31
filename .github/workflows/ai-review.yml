@@ -41,7 +41,7 @@ jobs:
               Diff: ${codeDiff}`;
 
             const response = await axios.post('https://api.perplexity.ai/chat/completions', {
-              model: 'claude-3-5-sonnet-20241022',
+              model: 'claude-4-5-sonnet',
               messages: [{ role: 'user', content: prompt }],
               max_tokens: 1500,
               temperature: 0.1
