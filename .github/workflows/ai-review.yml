@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Необходимо для получения полной истории
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -28,32 +30,53 @@ jobs:
           script: |
             const axios = require('axios');
             const prNumber = context.payload.pull_request.number;
+            
+            // Правильный способ получения diff
             const diffResponse = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber,
-              headers: { accept: 'application/vnd.github.diff' }
+              mediaType: {
+                format: 'diff'
+              }
             });
-            const codeDiff = diffResponse.data.substring(0, 4000);
-            const prompt = `Analyze diff code for autotesting:\n${codeDiff}`;
             
-            const response = await axios.post('https://api.perplexity.ai/chat/completions', {
-              model: 'claude-3-5-sonnet-20241022',
-              messages: [{ role: 'user', content: prompt }],
-              max_tokens: 1500,
-              temperature: 0.1,
-            }, {
-              headers: { 'Authorization': `Bearer ${process.env.PPLX_API_KEY}` }
-            });
-
-            const review = response.data.choices[0].message.content;
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body: `### Perplexity AI Review\n${review}`
-            });
+            const codeDiff = diffResponse.data.substring(0, 4000);
+            
+            const prompt = `Проанализируй этот diff кода автотестирования (Java, Selenium, WireMock, Jenkins, Postman API).
+              Найди потенциальные ошибки в assertions, driver.quit(), mocks teardown, API responses.
+              Проверь best practices: Page Object, error handling, CI/CD интеграция. 
+              Diff: ${codeDiff}`;
+            
+            try {
+              const response = await axios.post(
+                'https://api.perplexity.ai/chat/completions',
+                {
+                  model: 'sonar-pro',  // Исправлено: правильное название модели
+                  messages: [{ role: 'user', content: prompt }],
+                  max_tokens: 1500,
+                  temperature: 0.1
+                },
+                {
+                  headers: { 
+                    'Authorization': `Bearer ${process.env.PPLX_API_KEY}`,
+                    'Content-Type': 'application/json'
+                  }
+                }
+              );
+              
+              const review = response.data.choices[0].message.content;
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `### 🤖 Perplexity AI Code Review\n\n${review}`
+              });
+            } catch (error) {
+              console.error('Ошибка при вызове Perplexity API:', error.response?.data || error.message);
+              throw error;
+            }
         env:
           PPLX_API_KEY: ${{ secrets.PPLX_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
