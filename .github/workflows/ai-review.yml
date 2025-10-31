@@ -1,0 +1,32 @@
+name: Perplexity AI Code Reviewer for Autotesting
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Полный diff для анализа
+
+      - name: Setup Node.js (для API-call)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install axios  # Для HTTP-запроса к API
+
+      - name: Perplexity Code Review
+        run: node review.js  # Скрипт ниже
+        env:
+          PPLX_API_KEY: ${{ secrets.PPLX_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
