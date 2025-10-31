@@ -2,28 +2,24 @@ name: Perplexity AI Code Reviewer for Autotesting
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-    branches: [main]  # Только PR в main
+    branches: [main]
 
 permissions:
-  pull-requests: write  # Для комментариев
+  pull-requests: write
   contents: read
 
 jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install axios (для Perplexity API)
+      - name: Install axios
         run: npm install axios
 
       - name: Perplexity Code Review and Comment
@@ -31,66 +27,33 @@ jobs:
         with:
           script: |
             const axios = require('axios');
-            const { context } = require('@actions/github');
-            const core = require('@actions/core');
+            const prNumber = context.payload.pull_request.number;
+            const diffResponse = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              headers: { accept: 'application/vnd.github.diff' }
+            });
+            const codeDiff = diffResponse.data.substring(0, 4000);
+            const prompt = `Analyze diff code for autotesting:\n${codeDiff}`;
+            
+            const response = await axios.post('https://api.perplexity.ai/chat/completions', {
+              model: 'claude-3-5-sonnet-20241022',
+              messages: [{ role: 'user', content: prompt }],
+              max_tokens: 1500,
+              temperature: 0.1,
+            }, {
+              headers: { 'Authorization': `Bearer ${process.env.PPLX_API_KEY}` }
+            });
 
-            try {
-              const apiKey = process.env.PPLX_API_KEY;
-              if (!apiKey) {
-                core.setFailed('PPLX_API_KEY secret missing');
-                return;
-              }
+            const review = response.data.choices[0].message.content;
 
-              // Получаем PR номер
-              const prNumber = context.payload.pull_request.number;
-
-              // Получаем diff (через GitHub API)
-              const diffResponse = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                headers: {
-                  accept: 'application/vnd.github.diff'
-                }
-              });
-
-              const codeDiff = diffResponse.data.substring(0, 4000);  // Лимит для токенов
-
-              const prompt = `Проанализируй этот diff кода автотестирования (Java, Selenium, WireMock, Jenkins, Postman API).
-              Фокус: 
-              - Ошибки в assertions, driver.quit(), mocks teardown, API responses.
-              - Best practices: Page Object Model, error handling, CI/CD интеграция.
-              - Java/Groovy: типы, null checks, readability.
-              Предлагай улучшения с примерами кода. Используй search для актуальных docs.
-              Diff: ${codeDiff}`;
-
-              // Вызов Perplexity API
-              const response = await axios.post('https://api.perplexity.ai/chat/completions', {
-                model: 'claude-3-5-sonnet-20241022',  # Или 'sonar-large-online' для search
-                messages: [{ role: 'user', content: prompt }],
-                max_tokens: 1500,
-                temperature: 0.1
-              }, {
-                headers: {
-                  'Authorization': `Bearer ${apiKey}`,
-                  'Content-Type': 'application/json'
-                }
-              });
-
-              const review = response.data.choices[0].message.content;
-
-              // Постим комментарий в PR
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: `### Perplexity AI Code Review\n\n${review}\n\n*Sources: Perplexity API | Фокус на автотестировании (Selenium, API, CI/CD). Если вопросы — спросите! [1]*`
-              });
-
-              core.info('Review posted to PR!');
-            } catch (error) {
-              core.setFailed(`Error in review: ${error.message}`);
-            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `### Perplexity AI Review\n${review}`
+            });
         env:
           PPLX_API_KEY: ${{ secrets.PPLX_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
